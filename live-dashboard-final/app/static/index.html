@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Support triage · live</title>
+<style>
+  :root {
+    --bg: #f4f6f9; --card: #ffffff; --text: #17202b; --muted: #637083; --line: #e2e7ee;
+    --accent: #2f5bea; --critical: #d92d20; --high: #e8770c; --medium: #2f5bea; --low: #7a8697;
+    --ok: #12a150; --flash: rgba(47, 91, 234, 0.18);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0e131a; --card: #161d27; --text: #e7ecf3; --muted: #92a0b3; --line: #243042;
+            --accent: #7b97ff; --medium: #7b97ff; --flash: rgba(123, 151, 255, 0.22); }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         background: var(--bg); color: var(--text); }
+  header { display: flex; align-items: center; gap: 12px; padding: 16px 24px;
+           border-bottom: 1px solid var(--line); background: var(--card); }
+  header h1 { font-size: 18px; margin: 0; font-weight: 650; }
+  header .sub { color: var(--muted); }
+  .pill { margin-left: auto; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
+          border: 1px solid var(--line); }
+  .pill.live { color: var(--ok); border-color: var(--ok); }
+  .pill.connecting, .pill.reconnecting { color: var(--high); border-color: var(--high); }
+  main { max-width: 1280px; margin: 0 auto; padding: 20px 24px 48px; display: grid; gap: 16px; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .kpi { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  .kpi .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .kpi .value { font-size: 26px; font-weight: 700; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .kpi.alert .value { color: var(--critical); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 800px) { .grid2 { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .card h2 { font-size: 13px; margin: 0 0 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .bar-row { display: grid; grid-template-columns: 110px 1fr 36px; align-items: center; gap: 10px; margin: 6px 0; }
+  .bar-track { background: var(--bg); border-radius: 6px; height: 10px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 6px; background: var(--accent); transition: width .4s ease; }
+  .bar-count { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }
+  .toolbar input[type=text], .toolbar select { padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px;
+          background: var(--bg); color: var(--text); font: inherit; }
+  .toolbar label { color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .toolbar .count { margin-left: auto; color: var(--muted); }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em;
+       padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr.row { cursor: pointer; }
+  tr.row:hover { background: var(--bg); }
+  tr.flash { animation: flash 1.6s ease-out; }
+  @keyframes flash { from { background: var(--flash); } to { background: transparent; } }
+  .ticket { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--muted); }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 12px; font-weight: 600;
+           border: 1px solid var(--line); white-space: nowrap; }
+  .u-critical { color: var(--critical); border-color: var(--critical); }
+  .u-high { color: var(--high); border-color: var(--high); }
+  .u-medium { color: var(--medium); border-color: var(--medium); }
+  .u-low { color: var(--low); }
+  .review { color: var(--high); font-weight: 600; margin-left: 8px; white-space: nowrap; }
+  .muted { color: var(--muted); }
+  .status-failed { color: var(--critical); font-weight: 600; }
+  .status-done { color: var(--ok); }
+  tr.detail td { background: var(--bg); }
+  .detail-grid { display: grid; grid-template-columns: 120px 1fr; gap: 4px 12px; }
+  .detail-grid .k { color: var(--muted); }
+  .detail-grid pre { margin: 0; white-space: pre-wrap; font: inherit; }
+  details.card summary { cursor: pointer; font-weight: 600; }
+  form { display: grid; gap: 10px; margin-top: 12px; max-width: 640px; }
+  form input, form textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+          background: var(--bg); color: var(--text); font: inherit; }
+  form .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  button { padding: 7px 14px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent);
+           color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+  button.ghost { background: transparent; color: var(--accent); }
+  .msg { color: var(--muted); }
+  .empty { text-align: center; color: var(--muted); padding: 28px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Support triage</h1><span class="sub">tickets classified by Claude, live</span>
+  <span id="conn" class="pill connecting" role="status" aria-live="polite">connecting…</span>
+</header>
+
+<main>
+  <section class="kpis" id="kpis"></section>
+
+  <section class="grid2">
+    <div class="card"><h2>By urgency</h2><div id="byUrgency"></div></div>
+    <div class="card"><h2>By category</h2><div id="byCategory"></div></div>
+  </section>
+
+  <section class="card">
+    <div class="toolbar">
+      <input type="text" id="search" placeholder="Search ticket, customer, subject…" aria-label="Search">
+      <select id="urgencyFilter" aria-label="Filter by urgency">
+        <option value="">All urgencies</option>
+        <option value="critical">critical</option>
+        <option value="high">high</option>
+        <option value="medium">medium</option>
+        <option value="low">low</option>
+      </select>
+      <label><input type="checkbox" id="reviewOnly"> Needs review only</label>
+      <span class="count" id="count"></span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Arrived</th><th>Ticket</th><th>Customer</th><th>Subject</th>
+          <th>Category</th><th>Urgency</th><th>Status</th><th>AI summary</th>
+        </tr></thead>
+        <tbody id="feed"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <details class="card">
+    <summary>Send a test ticket</summary>
+    <form id="testForm">
+      <div class="row">
+        <span class="muted">Presets:</span>
+        <button type="button" class="ghost" data-preset="outage">Outage</button>
+        <button type="button" class="ghost" data-preset="security">Security</button>
+        <button type="button" class="ghost" data-preset="howto">How-to</button>
+      </div>
+      <input id="fCustomer" placeholder="Customer account" value="Demo Customer" aria-label="Customer account">
+      <input id="fSubject" placeholder="Subject" aria-label="Subject">
+      <textarea id="fDescription" rows="3" placeholder="Describe the problem" aria-label="Description"></textarea>
+      <div class="row"><button type="submit">Send ticket</button><span id="formMsg" class="msg"></span></div>
+    </form>
+  </details>
+</main>
+
+<script>
+"use strict";
+
+const $ = (id) => document.getElementById(id);
+const URGENCY_ORDER = ["critical", "high", "medium", "low"];
+const MAX_ROWS = 100;          // rows shown
+const KEEP_ROWS = 300;         // rows kept in memory
+
+const state = {
+  rows: new Map(),             // ticket id -> ticket
+  stats: null,
+  syncing: false,
+  buffer: [],                  // live events that arrive while a sync is in flight
+  expanded: new Set(),         // ticket ids whose detail row is open
+  flash: new Set(),            // ticket ids to highlight on the next render
+};
+
+// ---------------------------------------------------------------------------
+// SECURITY: every piece of ticket text is untrusted, because customers wrote it.
+// It is ONLY ever put into the page with textContent, never innerHTML, so a
+// ticket containing  <img src=x onerror=...>  is displayed as plain text and
+// cannot run code (cross-site scripting, XSS).
+// ---------------------------------------------------------------------------
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined && text !== null) node.textContent = String(text);
+  return node;
+}
+function cell(...children) {
+  const td = el("td");
+  td.append(...children);
+  return td;
+}
+
+async function getJson(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(url + " -> " + res.status);
+  return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------
+function renderKpis() {
+  const box = $("kpis");
+  box.replaceChildren();
+  const s = state.stats;
+  if (!s) return;
+  const items = [
+    ["Tickets", s.total, ""],
+    ["Waiting", s.pending + s.processing, ""],
+    ["Classified", s.done, ""],
+    ["Needs review", s.needs_review, s.needs_review > 0 ? "alert" : ""],
+    ["Failed", s.failed, s.failed > 0 ? "alert" : ""],
+    ["AI cost", "$" + s.total_cost_usd.toFixed(4), ""],
+  ];
+  for (const [label, value, cls] of items) {
+    const card = el("div", "kpi " + cls);
+    card.append(el("div", "label", label), el("div", "value", value));
+    box.append(card);
+  }
+}
+
+function renderBars(containerId, items, colorFor) {
+  const box = $(containerId);
+  box.replaceChildren();
+  if (items.length === 0) { box.append(el("div", "muted", "No data yet")); return; }
+  const max = Math.max(1, ...items.map((i) => i.count));
+  for (const item of items) {
+    const track = el("div", "bar-track");
+    const fill = el("div", "bar-fill");
+    fill.style.width = (item.count / max) * 100 + "%";
+    if (colorFor) fill.style.background = colorFor(item.label);
+    track.append(fill);
+    const row = el("div", "bar-row");
+    row.append(el("div", "", item.label), track, el("div", "bar-count", item.count));
+    box.append(row);
+  }
+}
+
+function renderBreakdowns() {
+  const s = state.stats;
+  if (!s) return;
+  const counts = Object.fromEntries(s.by_urgency.map((u) => [u.label, u.count]));
+  renderBars("byUrgency",
+    URGENCY_ORDER.map((label) => ({ label, count: counts[label] || 0 })),
+    (label) => "var(--" + label + ")");
+  renderBars("byCategory", s.by_category);
+}
+
+const subjectOf = (t) => t.subject || (t.body || "").split("\n\n")[0];
+const ticketIdOf = (t) => (t.source_key || "").replace(/^sheet:/, "");
+const STATUS_LABEL = { pending: "queued", processing: "classifying…", done: "done", failed: "failed" };
+
+function visibleRows() {
+  const q = $("search").value.trim().toLowerCase();
+  const urgency = $("urgencyFilter").value;
+  const reviewOnly = $("reviewOnly").checked;
+  return [...state.rows.values()]
+    .filter((t) => !urgency || t.urgency === urgency)
+    .filter((t) => !reviewOnly || t.needs_human_review === true)
+    .filter((t) => !q || [ticketIdOf(t), t.author, subjectOf(t)].join(" ").toLowerCase().includes(q))
+    .sort((a, b) => b.id - a.id)
+    .slice(0, MAX_ROWS);
+}
+
+function detailRow(t) {
+  const grid = el("div", "detail-grid");
+  const add = (key, value) => {
+    if (value === null || value === undefined || value === "") return;
+    grid.append(el("div", "k", key), el("pre", "", value));
+  };
+  add("Ticket text", t.body);
+  add("AI rationale", t.rationale);
+  add("Reported by", t.reported_by);
+  add("Channel", t.channel);
+  add("Attempts", t.enrich_attempts);
+  add("Error", t.enrich_error);
+  add("AI cost", t.cost_usd === null || t.cost_usd === undefined ? null : "$" + t.cost_usd.toFixed(5));
+  const td = cell(grid);
+  td.colSpan = 8;
+  const tr = el("tr", "detail");
+  tr.append(td);
+  return tr;
+}
+
+function renderFeed() {
+  const body = $("feed");
+  body.replaceChildren();
+  const rows = visibleRows();
+  $("count").textContent = rows.length + " shown";
+
+  if (rows.length === 0) {
+    const td = cell(el("span", "", state.rows.size ? "No tickets match the filters." : "No tickets yet."));
+    td.colSpan = 8;
+    td.className = "empty";
+    const tr = el("tr");
+    tr.append(td);
+    body.append(tr);
+    return;
+  }
+
+  for (const t of rows) {
+    const tr = el("tr", "row" + (state.flash.has(t.id) ? " flash" : ""));
+    tr.dataset.id = t.id;
+    tr.addEventListener("click", () => {
+      state.expanded.has(t.id) ? state.expanded.delete(t.id) : state.expanded.add(t.id);
+      renderFeed();
+    });
+
+    const category = t.category ? el("span", "badge", t.category) : el("span", "muted", "—");
+    const urgency = t.urgency ? el("span", "badge u-" + t.urgency, t.urgency) : el("span", "muted", "—");
+    const status = el("span", "status-" + t.enrich_status, STATUS_LABEL[t.enrich_status] || t.enrich_status);
+    const summary = cell(el("span", t.summary ? "" : "muted", t.summary || "—"));
+    if (t.needs_human_review) summary.append(el("span", "review", "⚑ review"));
+
+    tr.append(
+      cell(el("span", "muted", new Date(t.ingested_at).toLocaleTimeString())),
+      cell(el("span", "ticket", ticketIdOf(t))),
+      cell(el("span", "", t.author || "—")),
+      cell(el("span", "", subjectOf(t))),
+      cell(category), cell(urgency), cell(status), summary,
+    );
+    body.append(tr);
+    if (state.expanded.has(t.id)) body.append(detailRow(t));
+  }
+  state.flash.clear();
+}
+
+// Several events can arrive in a burst; draw at most once per animation frame.
+let renderQueued = false;
+function scheduleRender() {
+  if (renderQueued) return;
+  renderQueued = true;
+  requestAnimationFrame(() => { renderQueued = false; renderFeed(); });
+}
+
+// ---------------------------------------------------------------------------
+// Loading data. A "sync" reloads everything from the REST API. We run one when
+// the live connection opens, and whenever the server says "resync", because
+// Postgres does not store notifications for anyone who was not listening.
+// ---------------------------------------------------------------------------
+async function sync() {
+  state.syncing = true;
+  state.buffer = [];
+  try {
+    const [messages, stats] = await Promise.all([getJson("/messages?limit=" + MAX_ROWS), getJson("/stats")]);
+    state.rows.clear();
+    for (const m of messages) state.rows.set(m.id, m);
+    state.stats = stats;
+    // Replay live events that arrived while we were loading, so a newer pushed
+    // update is never overwritten by an older snapshot.
+    for (const ev of state.buffer) state.rows.set(ev.data.id, ev.data);
+  } catch (err) {
+    console.error("sync failed", err);
+  } finally {
+    state.syncing = false;
+    state.buffer = [];
+    renderKpis();
+    renderBreakdowns();
+    renderFeed();
+  }
+}
+
+let statsTimer = null;
+function scheduleStats() {                       // debounce: many events, one /stats call
+  if (statsTimer) return;
+  statsTimer = setTimeout(async () => {
+    statsTimer = null;
+    try { state.stats = await getJson("/stats"); renderKpis(); renderBreakdowns(); } catch (err) { /* next event retries */ }
+  }, 300);
+}
+
+function pruneRows() {
+  if (state.rows.size <= KEEP_ROWS) return;
+  const ids = [...state.rows.keys()].sort((a, b) => a - b);
+  for (const id of ids.slice(0, state.rows.size - KEEP_ROWS)) state.rows.delete(id);
+}
+
+function onEvent(ev) {
+  if (ev.type === "resync") { sync(); return; }
+  if (ev.type !== "message") return;
+  if (state.syncing) { state.buffer.push(ev); return; }
+  state.rows.set(ev.data.id, ev.data);
+  state.flash.add(ev.data.id);
+  pruneRows();
+  scheduleRender();
+  scheduleStats();
+}
+
+// ---------------------------------------------------------------------------
+// The live connection. If it drops, retry with growing delays (1s, 2s, 4s ... 15s).
+// ---------------------------------------------------------------------------
+let socket = null;
+let attempts = 0;
+
+function setConn(kind, text) {
+  const pill = $("conn");
+  pill.className = "pill " + kind;
+  pill.textContent = text;
+}
+
+function connect() {
+  const scheme = location.protocol === "https:" ? "wss" : "ws";
+  socket = new WebSocket(scheme + "://" + location.host + "/ws");
+  socket.onopen = () => { attempts = 0; setConn("live", "● live"); sync(); };
+  socket.onmessage = (e) => {
+    try { onEvent(JSON.parse(e.data)); } catch (err) { console.error("bad message", err); }
+  };
+  socket.onclose = () => {
+    setConn("reconnecting", "reconnecting…");
+    setTimeout(connect, Math.min(1000 * 2 ** attempts++, 15000));
+  };
+  socket.onerror = () => socket.close();
+}
+
+// ---------------------------------------------------------------------------
+// Filters and the test-ticket form
+// ---------------------------------------------------------------------------
+for (const id of ["search", "urgencyFilter", "reviewOnly"]) $(id).addEventListener("input", renderFeed);
+
+const PRESETS = {
+  outage: { customer: "Helix Freight", subject: "Entire depot network offline",
+            description: "Live tracking has gone blank for all 12 depots since 6:40 PM. Trucks are leaving without route data." },
+  security: { customer: "Kestrel Health", subject: "Unexpected data in shared report link",
+              description: "A report link we shared with an external auditor shows patient names that should have been masked." },
+  howto: { customer: "Orbis Retail", subject: "Where do I change my display language?",
+           description: "Looking for the setting to switch the interface to Hindi." },
+};
+for (const button of document.querySelectorAll("[data-preset]")) {
+  button.addEventListener("click", () => {
+    const p = PRESETS[button.dataset.preset];
+    $("fCustomer").value = p.customer;
+    $("fSubject").value = p.subject;
+    $("fDescription").value = p.description;
+  });
+}
+
+$("testForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const customer = $("fCustomer").value.trim();
+  const subject = $("fSubject").value.trim();
+  const description = $("fDescription").value.trim();
+  const out = $("formMsg");
+  if (!subject && !description) { out.textContent = "Enter a subject or a description."; return; }
+  try {
+    const res = await fetch("/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        source_key: "demo-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6),
+        source: "dashboard",
+        author: customer || null,
+        body: [subject, description].filter(Boolean).join("\n\n"),
+      }),
+    });
+    out.textContent = res.ok ? "Sent. Watch it arrive, get classified, then update live." : "Failed: HTTP " + res.status;
+  } catch (err) {
+    out.textContent = "Failed: " + err.message;
+  }
+});
+
+renderKpis();
+renderBreakdowns();
+renderFeed();
+connect();
+</script>
+</body>
+</html>

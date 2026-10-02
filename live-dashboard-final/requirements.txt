@@ -1,0 +1,10 @@
+# Pinned to the exact versions this project was tested with, so a build today and a
+# build in six months install the same thing. (Unpinned installs pick "latest", and
+# "latest" can change behaviour without warning: the Anthropic SDK dropped its
+# `temperature` argument that way.)
+fastapi==0.142.2
+uvicorn[standard]==0.54.0     # the web server; [standard] adds WebSocket support
+asyncpg==0.31.0               # async Postgres driver
+python-dotenv==1.2.2          # reads the .env file
+httpx==0.28.1                 # the poller's HTTP client
+anthropic==1.11.0             # Claude

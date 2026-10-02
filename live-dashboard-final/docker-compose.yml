@@ -1,0 +1,71 @@
+# Run the whole system with:   docker compose up --build
+#
+# Four containers:
+#   db      Postgres: the database and the work queue
+#   api     serves the dashboard, the REST API and the live WebSocket feed
+#   poller  copies new tickets from the Google Sheet into the database
+#   worker  asks Claude to classify each new ticket
+
+# "x-" blocks are ignored by Docker; this one is a template reused below with
+# `<<: *app`, so the three Python services share the same settings.
+x-app: &app
+  build: .
+  image: live-dashboard-app
+  # Reads your keys from the .env file in this folder.
+  env_file: .env
+  environment:
+    # Inside Docker's private network the database is reachable by its SERVICE NAME,
+    # "db", not "localhost". This overrides the localhost value in .env.
+    DATABASE_URL: postgresql://dashboard:dashboard_dev_password@db:5432/dashboard
+    # LOG_FORMAT: json     # uncomment for one-JSON-object-per-line logs
+  # Wait until Postgres is genuinely ready (see its healthcheck), not just started.
+  depends_on:
+    db:
+      condition: service_healthy
+  restart: unless-stopped
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: dashboard
+      POSTGRES_PASSWORD: dashboard_dev_password      # dev only; use a secrets manager in production
+      POSTGRES_DB: dashboard
+    # 127.0.0.1 = reachable from this computer only, never from the network.
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data              # data survives `docker compose down`
+      # Runs once, when the database is first created, and builds every table.
+      - ./schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dashboard -d dashboard"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    <<: *app
+    command: ["python", "-m", "uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  poller:
+    <<: *app
+    command: ["python", "-m", "app.poller"]
+
+  worker:
+    <<: *app
+    command: ["python", "-m", "app.worker"]
+    # On `docker compose stop`, Docker sends SIGTERM and waits this long. The worker
+    # finishes its current batch before exiting; the default (10s) could cut it short.
+    stop_grace_period: 45s
+
+volumes:
+  pgdata:
